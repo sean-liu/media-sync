@@ -1,6 +1,9 @@
 @echo off
 setlocal EnableExtensions
 
+rem Use UTF-8 for bilingual output on modern Windows terminals.
+chcp 65001 >nul 2>&1
+
 cd /d "%~dp0"
 if errorlevel 1 exit /b 1
 

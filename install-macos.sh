@@ -16,6 +16,10 @@ error() {
     printf '[ERROR] %s\n' "$1" >&2
 }
 
+warn() {
+    printf '[WARN] %s\n' "$1" >&2
+}
+
 run() {
     printf '[RUN ]'
     printf ' %q' "$@"
@@ -53,7 +57,19 @@ find_python() {
     return 1
 }
 
+locale_uses_utf8() {
+    case "${LC_ALL:-${LC_CTYPE:-${LANG:-}}}" in
+        *UTF-8* | *utf-8* | *UTF8* | *utf8*) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 cd "$SCRIPT_DIR" || exit 1
+
+if ! locale_uses_utf8; then
+    warn "Terminal locale does not look like UTF-8; Chinese text may display incorrectly. / 当前终端 locale 似乎不是 UTF-8，中文可能显示乱码。"
+fi
+
 info "Installing media-sync / 正在安装 media-sync"
 
 if [ ! -f "$REQUIREMENTS" ]; then

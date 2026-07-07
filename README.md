@@ -29,13 +29,19 @@ macOS：
 
 如果提示权限不足，先运行 `chmod +x install-macos.sh`。未安装合适 Python 时，脚本会通过已有的 Homebrew 安装 Python 3.12；若没有 Homebrew，则会显示 Python 官网安装指引。
 
-Windows 命令提示符（Command Prompt）：
+Windows Terminal、PowerShell 或命令提示符（Command Prompt）：
 
 ```bat
 install-windows.bat
 ```
 
+如果使用 PowerShell，请运行 `.\install-windows.bat`。
+
 未安装合适 Python 时，脚本会使用 `winget` 安装 Python 3.12。安装失败后修复提示的问题，再次运行同一脚本即可。
+
+安装脚本会尽量使用 UTF-8 显示中英双语日志。若中文仍显示乱码，通常只是终端显示编码问题，不代表安装一定失败；请优先根据英文日志和最后的错误码判断。
+
+macOS 建议在 Terminal、iTerm 或 VS Code 终端中运行，并使用 UTF-8 locale。若当前 locale 看起来不是 UTF-8，安装脚本会给出提示，但不会修改你的终端设置。
 
 ### 3. 配置 Zoom
 
@@ -135,13 +141,19 @@ macOS:
 
 If permission is denied, run `chmod +x install-macos.sh` first. When suitable Python is missing, the installer uses an existing Homebrew installation to install Python 3.12. Without Homebrew, it prints instructions for installing Python from the official website.
 
-Windows Command Prompt:
+Windows Terminal, PowerShell, or Command Prompt:
 
 ```bat
 install-windows.bat
 ```
 
+In PowerShell, run `.\install-windows.bat`.
+
 When suitable Python is missing, the installer installs Python 3.12 with `winget`. If installation fails, fix the reported issue and run the same installer again.
+
+The installer tries to use UTF-8 for bilingual logs. If Chinese text still looks garbled, it is usually a terminal display-encoding issue rather than proof that installation failed; use the English logs and the final exit code as the source of truth.
+
+On macOS, run the installer in Terminal, iTerm, or the VS Code terminal with a UTF-8 locale. If the current locale does not look like UTF-8, the installer prints a warning but does not change your terminal settings.
 
 ### 3. Configure Zoom
 
