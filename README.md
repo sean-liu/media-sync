@@ -45,14 +45,40 @@ macOS 建议在 Terminal、iTerm 或 VS Code 终端中运行，并使用 UTF-8 l
 
 ### 3. 配置 Zoom
 
-1. 打开 [Zoom App Marketplace](https://marketplace.zoom.us/)，选择 **Develop → Build App**。
-2. 创建 **Server-to-Server OAuth** 应用。
+Zoom 登录密码不能交给此脚本，也不要写入任何 JSON 文件。本项目只使用 Zoom Server-to-Server OAuth 应用凭据。
+
+1. 请账号管理员打开 [Zoom App Marketplace](https://marketplace.zoom.us/)，选择 **Develop → Build App**。
+2. 创建并激活 **Server-to-Server OAuth** 应用。
 3. 在应用的 **Scopes** 页面添加读取云录制所需的权限：
    `cloud_recording:read:list_recording_files:admin`。如果你的 Zoom 页面只显示传统权限，请添加 `recording:read:admin`。
-4. 激活应用。
-5. 准备好应用页面中的 **Account ID、Client ID、Client Secret**。
+4. 从应用页面取得 **Account ID、Client ID、Client Secret**。
+5. 在项目根目录新建 `zoom_secret.json`，内容如下（请替换示例值，不要加入 Zoom 登录密码）：
 
-脚本运行时会询问这三项；输入 Client Secret 时屏幕不会显示字符。也可以用环境变量提供：
+```json
+{
+  "account_id": "YOUR_ACCOUNT_ID",
+  "client_id": "YOUR_CLIENT_ID",
+  "client_secret": "YOUR_CLIENT_SECRET"
+}
+```
+
+6. 无参数运行配置程序：
+
+macOS：
+
+```bash
+.venv/bin/python configure.py
+```
+
+Windows：
+
+```bat
+.venv\Scripts\python.exe configure.py
+```
+
+程序只会识别项目根目录的 `zoom_secret.json`。确认后，它会临时向 Zoom 验证凭据；成功后将文件移动到 `config/zoom/secret.json`。临时输入文件和整个 `config/` 都已被 Git 忽略，验证取得的 Zoom access token 只在本次运行内使用，不会保存。
+
+高级用户也可以用完整的三个环境变量覆盖文件配置：
 
 ```bash
 export ZOOM_ACCOUNT_ID="你的 Account ID"
@@ -60,9 +86,11 @@ export ZOOM_CLIENT_ID="你的 Client ID"
 export ZOOM_CLIENT_SECRET="你的 Client Secret"
 ```
 
-不要把这些值写进代码或提交到 Git。
+必须同时设置三个变量；只设置一部分会报错，不会与文件配置混用。不要把这些值写进代码或提交到 Git。
 
 ### 4. 配置 YouTube（只需一次）
+
+YouTube 配置仍使用下面的现有手动流程；`configure.py` 当前只处理 Zoom，后续任务才会加入 `youtube_secret.json` 支持。
 
 1. 打开 [Google Cloud Console](https://console.cloud.google.com/) 并创建或选择项目。
 2. 启用 **YouTube Data API v3**。
@@ -157,13 +185,39 @@ On macOS, run the installer in Terminal, iTerm, or the VS Code terminal with a U
 
 ### 3. Configure Zoom
 
-1. Open the [Zoom App Marketplace](https://marketplace.zoom.us/) and choose **Develop → Build App**.
-2. Create a **Server-to-Server OAuth** app.
-3. On its **Scopes** page, add `cloud_recording:read:list_recording_files:admin`. If your Zoom account only shows classic scopes, add `recording:read:admin`.
-4. Activate the app.
-5. Keep its **Account ID, Client ID, and Client Secret** ready.
+Never give this script your Zoom sign-in password or put that password in any JSON file. This project uses only Zoom Server-to-Server OAuth app credentials.
 
-The script asks for these values when it runs; the secret is hidden while you type. Alternatively, set them as environment variables:
+1. Ask an account administrator to open the [Zoom App Marketplace](https://marketplace.zoom.us/) and choose **Develop → Build App**.
+2. Create and activate a **Server-to-Server OAuth** app.
+3. On its **Scopes** page, add `cloud_recording:read:list_recording_files:admin`. If your Zoom account only shows classic scopes, add `recording:read:admin`.
+4. Copy its **Account ID, Client ID, and Client Secret**.
+5. Create `zoom_secret.json` in the project root with the following content (replace the examples and do not add your Zoom sign-in password):
+
+```json
+{
+  "account_id": "YOUR_ACCOUNT_ID",
+  "client_id": "YOUR_CLIENT_ID",
+  "client_secret": "YOUR_CLIENT_SECRET"
+}
+```
+
+6. Run the configuration program without arguments:
+
+macOS:
+
+```bash
+.venv/bin/python configure.py
+```
+
+Windows:
+
+```bat
+.venv\Scripts\python.exe configure.py
+```
+
+The program recognizes only `zoom_secret.json` in the project root. After confirmation, it temporarily validates the credentials with Zoom and, on success, moves the file to `config/zoom/secret.json`. Git ignores both the temporary input file and the entire `config/` directory. The Zoom access token obtained for validation is used only for that run and is never saved.
+
+Advanced users can instead override the file with all three environment variables:
 
 ```bash
 export ZOOM_ACCOUNT_ID="your Account ID"
@@ -171,9 +225,11 @@ export ZOOM_CLIENT_ID="your Client ID"
 export ZOOM_CLIENT_SECRET="your Client Secret"
 ```
 
-Never put these values in the source code or commit them to Git.
+All three variables must be set together. A partial set is rejected and is never mixed with file credentials. Never put these values in the source code or commit them to Git.
 
 ### 4. Configure YouTube (once)
+
+YouTube still uses the existing manual process below. `configure.py` currently handles only Zoom; support for `youtube_secret.json` belongs to a later task.
 
 1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
 2. Enable **YouTube Data API v3**.
@@ -236,6 +292,8 @@ Test with `private` (the default) first. Only use `public` after checking the co
 - `requirements.txt` — Python package list / Python 依赖清单
 - `install-macos.sh` — macOS installer / macOS 安装脚本
 - `install-windows.bat` — Windows installer / Windows 安装脚本
+- `configure.py` — Zoom credential setup / Zoom 凭据配置
+- `zoom_auth.py` — shared Zoom authentication helpers / Zoom 认证共享逻辑
 - `zoom_to_youtube.py` — interactive transfer workflow / 交互式传输流程
 - `README.md` — setup and usage instructions / 配置与使用说明
 

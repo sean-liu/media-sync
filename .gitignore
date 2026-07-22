@@ -159,6 +159,7 @@ venv.bak/
 
 # Local credentials and tokens
 config/
+zoom_secret.json
 
 # Spyder project settings
 .spyderproject

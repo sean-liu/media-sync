@@ -4,16 +4,15 @@
 from __future__ import annotations
 
 import argparse
-import getpass
 import json
-import os
 import re
 import sys
 import time
 from pathlib import Path
 from urllib.parse import quote
 
-ZOOM_TOKEN_URL = "https://zoom.us/oauth/token"
+from zoom_auth import load_zoom_credentials, request_zoom_access_token
+
 ZOOM_API_URL = "https://api.zoom.us/v2"
 YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
 DEFAULT_CLIENT_SECRETS = "config/youtube_client_secret.json"
@@ -40,39 +39,15 @@ def load_dependencies() -> None:
         ) from error
 
 
-def prompt(label: str, default: str | None = None, secret: bool = False) -> str:
+def prompt(label: str, default: str | None = None) -> str:
     suffix = f" [{default}]" if default else ""
-    reader = getpass.getpass if secret else input
-    value = reader(f"{label}{suffix}: ").strip()
+    value = input(f"{label}{suffix}: ").strip()
     return value or (default or "")
 
 
-def require_value(environment_name: str, label: str, secret: bool = False) -> str:
-    value = os.environ.get(environment_name, "").strip()
-    if value:
-        return value
-    value = prompt(label, secret=secret)
-    if not value:
-        raise ValueError(f"{label} is required / 为必填项")
-    return value
-
-
 def zoom_access_token() -> str:
-    account_id = require_value("ZOOM_ACCOUNT_ID", "Zoom Account ID")
-    client_id = require_value("ZOOM_CLIENT_ID", "Zoom Client ID")
-    client_secret = require_value("ZOOM_CLIENT_SECRET", "Zoom Client Secret", secret=True)
-    response = requests.post(
-        ZOOM_TOKEN_URL,
-        params={"grant_type": "account_credentials", "account_id": account_id},
-        auth=(client_id, client_secret),
-        timeout=30,
-    )
-    if not response.ok:
-        raise RuntimeError(api_error("Zoom authentication failed / Zoom 认证失败", response))
-    token = response.json().get("access_token")
-    if not token:
-        raise RuntimeError("Zoom returned no access token / Zoom 未返回访问令牌")
-    return token
+    credentials = load_zoom_credentials(Path(__file__).resolve().parent)
+    return request_zoom_access_token(credentials, requests.post)
 
 
 def api_error(message: str, response: requests.Response) -> str:
