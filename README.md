@@ -43,16 +43,15 @@ install-windows.bat
 
 macOS 建议在 Terminal、iTerm 或 VS Code 终端中运行，并使用 UTF-8 locale。若当前 locale 看起来不是 UTF-8，安装脚本会给出提示，但不会修改你的终端设置。
 
-### 3. 配置 Zoom
+### 3. 准备 Zoom 与 YouTube 配置文件
 
-Zoom 登录密码不能交给此脚本，也不要写入任何 JSON 文件。本项目只使用 Zoom Server-to-Server OAuth 应用凭据。
+Zoom 的 JSON 是 Server-to-Server OAuth 应用凭据，不是 Zoom 账号密码。不要把登录密码交给本项目，也不要提交、发送或分享 secret 文件。
 
 1. 请账号管理员打开 [Zoom App Marketplace](https://marketplace.zoom.us/)，选择 **Develop → Build App**。
 2. 创建并激活 **Server-to-Server OAuth** 应用。
-3. 在应用的 **Scopes** 页面添加读取云录制所需的权限：
-   `cloud_recording:read:list_recording_files:admin`。如果你的 Zoom 页面只显示传统权限，请添加 `recording:read:admin`。
+3. 在 **Scopes** 页面添加 `cloud_recording:read:list_recording_files:admin`；如果页面只显示传统权限，请添加 `recording:read:admin`。
 4. 从应用页面取得 **Account ID、Client ID、Client Secret**。
-5. 在项目根目录新建 `zoom_secret.json`，内容如下（请替换示例值，不要加入 Zoom 登录密码）：
+5. 在项目根目录新建精确名称 `zoom_secret.json`（替换示例值，不要加入账号密码）：
 
 ```json
 {
@@ -62,7 +61,19 @@ Zoom 登录密码不能交给此脚本，也不要写入任何 JSON 文件。本
 }
 ```
 
-6. 无参数运行配置程序：
+Google 下载的 JSON 是桌面 OAuth 客户端配置，不是 Google 登录密码。账号所有者只应在稍后打开的 Google 系统浏览器页面自行登录；不要在终端或本项目的文件中输入登录密码。
+
+1. 打开 [Google Cloud Console](https://console.cloud.google.com/)，创建或选择项目。
+2. 在 API Library 中启用 **YouTube Data API v3**。
+3. 配置 **OAuth consent screen（OAuth 同意屏幕）**。如果应用处于测试状态，将实际授权的 Google 账号添加为 **test user（测试用户）**。
+4. 创建 OAuth Client ID，应用类型选择 **Desktop app（桌面应用）**。
+5. 下载客户端 JSON，将它改名为精确名称 `youtube_secret.json`，放在项目根目录。不要修改或分享其中的 client secret。
+
+此时根目录可以同时有 `zoom_secret.json` 和 `youtube_secret.json`；缺少其中一个不会阻止配置程序处理另一个。
+
+### 4. 运行统一配置
+
+无参数运行：
 
 macOS：
 
@@ -76,7 +87,24 @@ Windows：
 .venv\Scripts\python.exe configure.py
 ```
 
-程序只会识别项目根目录的 `zoom_secret.json`。确认后，它会临时向 Zoom 验证凭据；成功后将文件移动到 `config/zoom/secret.json`。临时输入文件和整个 `config/` 都已被 Git 忽略，验证取得的 Zoom access token 只在本次运行内使用，不会保存。
+`configure.py` 只从项目根目录读取精确名称 `zoom_secret.json` 和 `youtube_secret.json`，不会扫描、猜测或移动其他 JSON。它会隐藏字段值、显示目标路径并分别请求确认：
+
+- Zoom 凭据先通过 Zoom 临时验证，再安全移动到 `config/zoom/secret.json`；取得的 Zoom access token 不会保存。
+- YouTube 客户端验证为 Google Desktop OAuth JSON 后，安全移动到 `config/youtube/secret.json`。随后只申请 `youtube.upload` 权限，在系统浏览器打开 Google 授权页面，并安全生成 `config/youtube/token.json`。
+- 已有目标文件不会被覆盖；已有有效 YouTube token 会直接复用，必要时正常刷新。授权结束后程序会调用不会上传视频的 YouTube API 做最小验证。
+
+最终目录树：
+
+```text
+config/
+├── zoom/
+│   └── secret.json
+└── youtube/
+    ├── secret.json
+    └── token.json
+```
+
+成功移动后根目录输入文件会消失。`config/`、`zoom_secret.json` 和 `youtube_secret.json` 均被 Git 忽略，但这不能替代安全保管：不要提交、发送或分享任何 secret/token。YouTube secret 和 token 都不是 Google 账号密码，但都属于私密授权资料。
 
 高级用户也可以用完整的三个环境变量覆盖文件配置：
 
@@ -88,33 +116,15 @@ export ZOOM_CLIENT_SECRET="你的 Client Secret"
 
 必须同时设置三个变量；只设置一部分会报错，不会与文件配置混用。不要把这些值写进代码或提交到 Git。
 
-### 4. 配置 YouTube（只需一次）
-
-YouTube 配置仍使用下面的现有手动流程；`configure.py` 当前只处理 Zoom，后续任务才会加入 `youtube_secret.json` 支持。
-
-1. 打开 [Google Cloud Console](https://console.cloud.google.com/) 并创建或选择项目。
-2. 启用 **YouTube Data API v3**。
-3. 配置 OAuth consent screen（OAuth 同意屏幕）。应用在测试状态时，把自己的 Google 账号添加为测试用户。
-4. 创建 OAuth Client ID，应用类型选择 **Desktop app（桌面应用）**。
-5. 在项目目录创建 `config` 文件夹；下载 JSON，改名为 `youtube_client_secret.json`，放进该文件夹。
-
-目录结构如下：
-
-```text
-config/
-├── youtube_client_secret.json  # 从 Google Cloud 下载
-└── youtube_token.json          # 首次授权后由程序生成
-```
-
-第一次上传时浏览器会打开 Google 授权页面。授权成功后，脚本会在本地保存 `config/youtube_token.json`，以后通常不需要再次登录。整个 `config/` 目录已被 Git 忽略，不会提交其中的凭据。
-
-### 5. 运行
+### 5. 下载并上传
 
 ```bash
 .venv/bin/python zoom_to_youtube.py
 ```
 
 Windows 请运行 `.venv\Scripts\python.exe zoom_to_youtube.py`。以下示例在 macOS 使用 `.venv/bin/python`；Windows 用户替换为 `.venv\Scripts\python.exe` 即可。
+
+先完成上面的 `configure.py`。上传流程不会临时打开浏览器；如果 YouTube token 缺失、无效或无法刷新，会提示重新运行配置程序。
 
 按提示输入 Zoom 会议 ID（通常是 10–11 位数字）或某一次会议的 UUID。脚本会：
 
@@ -146,6 +156,7 @@ Windows 请运行 `.venv\Scripts\python.exe zoom_to_youtube.py`。以下示例�
 - **Zoom 找不到会议：** 确认录制属于这个 Zoom 账号。重复会议可改用该次会议的 UUID。
 - **找不到 MP4：** 等待 Zoom 完成云录制处理，并确认会议确实录制了视频。
 - **Google 显示应用未验证：** 个人测试项目可把自己的账号加入 OAuth 测试用户；不要给不信任的应用授权。
+- **YouTube token 无效或刷新失败：** 重新运行 `configure.py`，并只在 Google 系统浏览器页面完成登录与授权。
 - **上传中断：** 重新运行即可；已完整下载的同名文件会被复用。YouTube 上传会对常见临时服务错误自动重试。
 
 ## English guide
@@ -183,15 +194,15 @@ The installer tries to use UTF-8 for bilingual logs. If Chinese text still looks
 
 On macOS, run the installer in Terminal, iTerm, or the VS Code terminal with a UTF-8 locale. If the current locale does not look like UTF-8, the installer prints a warning but does not change your terminal settings.
 
-### 3. Configure Zoom
+### 3. Prepare the Zoom and YouTube files
 
-Never give this script your Zoom sign-in password or put that password in any JSON file. This project uses only Zoom Server-to-Server OAuth app credentials.
+The Zoom JSON contains Server-to-Server OAuth app credentials, not your Zoom account password. Never give this project your sign-in password, and do not commit, send, or share the secret file.
 
 1. Ask an account administrator to open the [Zoom App Marketplace](https://marketplace.zoom.us/) and choose **Develop → Build App**.
 2. Create and activate a **Server-to-Server OAuth** app.
-3. On its **Scopes** page, add `cloud_recording:read:list_recording_files:admin`. If your Zoom account only shows classic scopes, add `recording:read:admin`.
+3. On its **Scopes** page, add `cloud_recording:read:list_recording_files:admin`. If only classic scopes are available, add `recording:read:admin`.
 4. Copy its **Account ID, Client ID, and Client Secret**.
-5. Create `zoom_secret.json` in the project root with the following content (replace the examples and do not add your Zoom sign-in password):
+5. Create the exact filename `zoom_secret.json` in the project root (replace the examples and do not add an account password):
 
 ```json
 {
@@ -201,7 +212,19 @@ Never give this script your Zoom sign-in password or put that password in any JS
 }
 ```
 
-6. Run the configuration program without arguments:
+The Google download is a desktop OAuth client configuration, not your Google password. The account owner signs in only on Google's page in the system browser opened later. Never enter a Google password in the terminal or a project file.
+
+1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
+2. Enable **YouTube Data API v3** in the API Library.
+3. Configure the **OAuth consent screen**. While the app is in testing, add the Google account that will authorize it as a **test user**.
+4. Create an OAuth Client ID with application type **Desktop app**.
+5. Download the client JSON, rename it to the exact filename `youtube_secret.json`, and place it in the project root. Do not edit or share its client secret.
+
+Both `zoom_secret.json` and `youtube_secret.json` may be present together. A missing input does not stop the configuration program from processing the other one.
+
+### 4. Run the unified configuration
+
+Run it without arguments:
 
 macOS:
 
@@ -215,7 +238,24 @@ Windows:
 .venv\Scripts\python.exe configure.py
 ```
 
-The program recognizes only `zoom_secret.json` in the project root. After confirmation, it temporarily validates the credentials with Zoom and, on success, moves the file to `config/zoom/secret.json`. Git ignores both the temporary input file and the entire `config/` directory. The Zoom access token obtained for validation is used only for that run and is never saved.
+`configure.py` reads only the exact project-root names `zoom_secret.json` and `youtube_secret.json`; it does not scan, guess, or move other JSON files. It hides field values, shows each destination, and asks for confirmation:
+
+- Zoom credentials are temporarily validated with Zoom, then safely moved to `config/zoom/secret.json`. The temporary Zoom access token is never saved.
+- The YouTube client is validated as Google Desktop OAuth JSON, then safely moved to `config/youtube/secret.json`. The program requests only the `youtube.upload` scope, opens Google's authorization page in the system browser, and safely creates `config/youtube/token.json`.
+- Existing destinations are never overwritten. A valid YouTube token is reused and refreshed normally when needed. After authorization, the program makes a minimal YouTube API check that does not upload a video.
+
+The final layout is:
+
+```text
+config/
+├── zoom/
+│   └── secret.json
+└── youtube/
+    ├── secret.json
+    └── token.json
+```
+
+Successful moves remove the corresponding root input. Git ignores `config/`, `zoom_secret.json`, and `youtube_secret.json`, but that is not a substitute for secure handling: never commit, send, or share any secret or token. The YouTube secret and token are not your Google account password, but both contain private authorization data.
 
 Advanced users can instead override the file with all three environment variables:
 
@@ -227,33 +267,15 @@ export ZOOM_CLIENT_SECRET="your Client Secret"
 
 All three variables must be set together. A partial set is rejected and is never mixed with file credentials. Never put these values in the source code or commit them to Git.
 
-### 4. Configure YouTube (once)
-
-YouTube still uses the existing manual process below. `configure.py` currently handles only Zoom; support for `youtube_secret.json` belongs to a later task.
-
-1. Open [Google Cloud Console](https://console.cloud.google.com/) and create or select a project.
-2. Enable **YouTube Data API v3**.
-3. Configure the OAuth consent screen. If the app is in testing, add your Google account as a test user.
-4. Create an OAuth Client ID with application type **Desktop app**.
-5. Create a `config` folder in the project directory. Download the JSON, rename it to `youtube_client_secret.json`, and place it in that folder.
-
-The resulting layout is:
-
-```text
-config/
-├── youtube_client_secret.json  # downloaded from Google Cloud
-└── youtube_token.json          # generated after the first authorization
-```
-
-On the first upload, a browser opens for Google authorization. The script then stores `config/youtube_token.json` locally so later runs normally do not require another login. Git ignores the entire `config/` directory so its credentials are not committed.
-
-### 5. Run
+### 5. Download and upload
 
 ```bash
 .venv/bin/python zoom_to_youtube.py
 ```
 
 On Windows, run `.venv\Scripts\python.exe zoom_to_youtube.py`. The examples below use `.venv/bin/python` on macOS; Windows users can substitute `.venv\Scripts\python.exe`.
+
+Complete `configure.py` first. The upload workflow never opens a browser unexpectedly. If the YouTube token is missing, invalid, or cannot be refreshed, it tells you to run the configuration program again.
 
 Enter a Zoom meeting ID (usually 10–11 digits) or the UUID of a specific meeting occurrence. The script will:
 
@@ -285,6 +307,7 @@ Test with `private` (the default) first. Only use `public` after checking the co
 - **Zoom cannot find the meeting:** Confirm that the recording belongs to this Zoom account. For a recurring meeting, try the occurrence UUID.
 - **No MP4 is found:** Wait for Zoom to finish processing and confirm that the meeting recorded video.
 - **Google says the app is unverified:** For a personal test project, add your account as an OAuth test user. Never authorize an app you do not trust.
+- **The YouTube token is invalid or cannot refresh:** Run `configure.py` again and complete sign-in and authorization only on Google's page in the system browser.
 - **The upload is interrupted:** Run the script again. A completely downloaded file of the same name is reused, and common temporary YouTube errors are retried automatically.
 
 ## Files / 文件
@@ -292,7 +315,9 @@ Test with `private` (the default) first. Only use `public` after checking the co
 - `requirements.txt` — Python package list / Python 依赖清单
 - `install-macos.sh` — macOS installer / macOS 安装脚本
 - `install-windows.bat` — Windows installer / Windows 安装脚本
-- `configure.py` — Zoom credential setup / Zoom 凭据配置
+- `configure.py` — unified Zoom and YouTube setup / Zoom 与 YouTube 统一配置
+- `secure_files.py` — private-file publication helpers / 私密文件安全发布逻辑
+- `youtube_auth.py` — shared YouTube authorization helpers / YouTube 授权共享逻辑
 - `zoom_auth.py` — shared Zoom authentication helpers / Zoom 认证共享逻辑
 - `zoom_to_youtube.py` — interactive transfer workflow / 交互式传输流程
 - `README.md` — setup and usage instructions / 配置与使用说明

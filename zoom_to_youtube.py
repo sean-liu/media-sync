@@ -4,30 +4,25 @@
 from __future__ import annotations
 
 import argparse
-import json
 import re
 import sys
 import time
 from pathlib import Path
 from urllib.parse import quote
 
+from youtube_auth import load_youtube_credentials
 from zoom_auth import load_zoom_credentials, request_zoom_access_token
 
 ZOOM_API_URL = "https://api.zoom.us/v2"
-YOUTUBE_SCOPE = ["https://www.googleapis.com/auth/youtube.upload"]
-DEFAULT_CLIENT_SECRETS = "config/youtube_client_secret.json"
-DEFAULT_YOUTUBE_TOKEN = "config/youtube_token.json"
+DEFAULT_CLIENT_SECRETS = "config/youtube/secret.json"
+DEFAULT_YOUTUBE_TOKEN = "config/youtube/token.json"
 DOWNLOAD_DIR = "downloads"
 
 
 def load_dependencies() -> None:
-    global requests, Request, Credentials, InstalledAppFlow
-    global build, HttpError, MediaFileUpload, tqdm
+    global requests, build, HttpError, MediaFileUpload, tqdm
     try:
         import requests
-        from google.auth.transport.requests import Request
-        from google.oauth2.credentials import Credentials
-        from google_auth_oauthlib.flow import InstalledAppFlow
         from googleapiclient.discovery import build
         from googleapiclient.errors import HttpError
         from googleapiclient.http import MediaFileUpload
@@ -161,26 +156,12 @@ def download_recording(meeting: dict, recording: dict, access_token: str, output
     return destination
 
 
-def youtube_credentials(client_secrets: Path, token_file: Path) -> Credentials:
-    credentials = None
-    if token_file.exists():
-        try:
-            credentials = Credentials.from_authorized_user_file(token_file, YOUTUBE_SCOPE)
-        except (ValueError, json.JSONDecodeError):
-            print("Saved YouTube login is invalid; signing in again / 已保存登录无效，将重新登录。")
-    if credentials and credentials.expired and credentials.refresh_token:
-        credentials.refresh(Request())
-    if not credentials or not credentials.valid:
-        if not client_secrets.exists():
-            raise FileNotFoundError(
-                f"YouTube OAuth file not found / 找不到 YouTube OAuth 文件: {client_secrets}"
-            )
-        flow = InstalledAppFlow.from_client_secrets_file(str(client_secrets), YOUTUBE_SCOPE)
-        credentials = flow.run_local_server(port=0, prompt="consent")
-    token_file.parent.mkdir(parents=True, exist_ok=True)
-    token_file.write_text(credentials.to_json(), encoding="utf-8")
-    token_file.chmod(0o600)
-    return credentials
+def youtube_credentials(client_secrets: Path, token_file: Path):
+    return load_youtube_credentials(
+        client_secrets,
+        token_file,
+        interactive=False,
+    ).credentials
 
 
 def upload_to_youtube(
@@ -188,10 +169,8 @@ def upload_to_youtube(
     title: str,
     description: str,
     privacy: str,
-    client_secrets: Path,
-    token_file: Path,
+    credentials,
 ) -> str:
-    credentials = youtube_credentials(client_secrets, token_file)
     youtube = build("youtube", "v3", credentials=credentials, cache_discovery=False)
     request = youtube.videos().insert(
         part="snippet,status",
@@ -241,7 +220,6 @@ def parse_args() -> argparse.Namespace:
         help="YouTube visibility (default: private) / 可见性（默认：私享）",
     )
     parser.add_argument("--output-dir", default=DOWNLOAD_DIR, help="Download folder / 下载目录")
-    parser.add_argument("--youtube-client-secrets", default=DEFAULT_CLIENT_SECRETS)
     parser.add_argument("--yes", action="store_true", help="Skip final confirmation / 跳过最终确认")
     return parser.parse_args()
 
@@ -250,6 +228,10 @@ def main() -> int:
     args = parse_args()
     try:
         load_dependencies()
+        credentials = youtube_credentials(
+            Path(DEFAULT_CLIENT_SECRETS),
+            Path(DEFAULT_YOUTUBE_TOKEN),
+        )
         meeting_id = args.meeting_id or prompt("Zoom meeting ID or UUID / Zoom 会议 ID 或 UUID")
         if not meeting_id:
             raise ValueError("Meeting ID is required / 会议 ID 为必填项")
@@ -281,8 +263,7 @@ def main() -> int:
             title,
             description,
             args.privacy,
-            Path(args.youtube_client_secrets).expanduser(),
-            Path(DEFAULT_YOUTUBE_TOKEN),
+            credentials,
         )
         print(f"\nDone / 完成: https://youtu.be/{video_id}")
         print(f"Local file kept at / 本地文件保留在: {video_path}")

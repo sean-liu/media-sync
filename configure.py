@@ -1,14 +1,21 @@
 #!/usr/bin/env python3
-"""Validate and install the project-root Zoom secret file."""
+"""Configure local Zoom and YouTube credentials from exact root filenames."""
 
 from __future__ import annotations
 
-import os
 import sys
-import tempfile
 from pathlib import Path
-from typing import Callable
+from typing import Any, Callable
 
+from secure_files import move_private_text
+from youtube_auth import (
+    YouTubeAuthorizationError,
+    YouTubeConfigurationError,
+    YouTubeCredentialsResult,
+    load_youtube_credentials,
+    read_youtube_secret,
+    verify_youtube_credentials,
+)
 from zoom_auth import (
     ZoomConfigurationError,
     ZoomCredentials,
@@ -20,6 +27,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent
 ZOOM_INPUT = "zoom_secret.json"
 ZOOM_TARGET = Path("config") / "zoom" / "secret.json"
 ZOOM_TEMP_PREFIX = ".zoom-secret-"
+YOUTUBE_INPUT = "youtube_secret.json"
+YOUTUBE_TARGET = Path("config") / "youtube" / "secret.json"
+YOUTUBE_TOKEN = Path("config") / "youtube" / "token.json"
+YOUTUBE_TEMP_PREFIX = ".youtube-secret-"
 
 
 def confirmed(input_func: Callable[[str], str]) -> bool:
@@ -29,62 +40,44 @@ def confirmed(input_func: Callable[[str], str]) -> bool:
     return answer in ("y", "yes", "是")
 
 
-def _write_secret_contents(file_descriptor: int, contents: str) -> None:
-    with open(
-        file_descriptor,
-        "w",
-        encoding="utf-8",
-        newline="",
-        closefd=False,
-    ) as output:
-        output.write(contents)
-        output.flush()
-        os.fsync(output.fileno())
+def move_secret_file(
+    source: Path,
+    target: Path,
+    contents: str,
+    temporary_prefix: str = ZOOM_TEMP_PREFIX,
+) -> bool:
+    return move_private_text(
+        source,
+        target,
+        contents,
+        temporary_prefix=temporary_prefix,
+    )
 
 
-def move_secret_file(source: Path, target: Path, contents: str) -> bool:
-    target.parent.mkdir(parents=True, exist_ok=True)
-    file_descriptor: int | None = None
-    temporary_path: Path | None = None
-    permissions_set = True
-    try:
-        file_descriptor, temporary_name = tempfile.mkstemp(
-            prefix=ZOOM_TEMP_PREFIX,
-            suffix=".tmp",
-            dir=target.parent,
+def _report_move_interrupt(platform: str, source: Path, target: Path) -> None:
+    if target.exists() and source.exists():
+        print(
+            f"Setup was interrupted after a final {platform} configuration appeared. "
+            "Both files were kept; inspect them before removing the root input "
+            f"/ 最终 {platform} 配置出现后设置被中断；两个文件均已保留，"
+            "删除根目录输入文件前请先检查",
+            file=sys.stderr,
         )
-        temporary_path = Path(temporary_name)
-        if os.name == "posix":
-            try:
-                temporary_path.chmod(0o600)
-            except OSError:
-                permissions_set = False
-
-        _write_secret_contents(file_descriptor, contents)
-        os.close(file_descriptor)
-        file_descriptor = None
-
-        # Hard-link publication is atomic and fails if the target already exists.
-        os.link(temporary_path, target)
-        temporary_path.unlink()
-        temporary_path = None
-        source.unlink()
-    except BaseException as error:
-        cleanup_error: OSError | None = None
-        if file_descriptor is not None:
-            try:
-                os.close(file_descriptor)
-            except OSError as close_error:
-                cleanup_error = close_error
-        if temporary_path is not None:
-            try:
-                temporary_path.unlink(missing_ok=True)
-            except OSError as unlink_error:
-                cleanup_error = cleanup_error or unlink_error
-        if cleanup_error is not None:
-            raise cleanup_error from error
-        raise
-    return permissions_set
+    elif target.exists():
+        print(
+            f"Setup was interrupted after the final {platform} configuration was saved. "
+            "The root input is already gone; check the final file before retrying "
+            f"/ 最终 {platform} 配置保存后设置被中断；根目录输入文件已不存在，"
+            "重试前请检查最终文件",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Setup was interrupted before the final {platform} configuration was published. "
+            "The input file was kept and temporary files were cleaned up "
+            f"/ 最终 {platform} 配置发布前设置被中断；输入文件已保留，临时文件已清理",
+            file=sys.stderr,
+        )
 
 
 def configure_zoom(
@@ -97,16 +90,20 @@ def configure_zoom(
 
     if target.exists():
         print(
-            "Zoom configuration already exists. Check the existing configuration; "
-            "neither file was changed / Zoom 配置已存在，请检查现有配置；两个文件均未更改"
+            "Zoom is already configured; the existing file was not overwritten "
+            "/ Zoom 已配置，未覆盖现有文件"
         )
-        return 1
+        if source.exists():
+            print(
+                f"The root {ZOOM_INPUT} was kept / 根目录 {ZOOM_INPUT} 已保留"
+            )
+        return 0
     if not source.is_file():
         print(
-            f"Place {ZOOM_INPUT} in the project root and run this script again "
-            f"/ 请将 {ZOOM_INPUT} 放到项目根目录后重新运行此脚本"
+            f"No {ZOOM_INPUT} found; skipping Zoom setup "
+            f"/ 未找到 {ZOOM_INPUT}，跳过 Zoom 配置"
         )
-        return 1
+        return 0
 
     try:
         credentials, contents = read_zoom_secret(source)
@@ -139,29 +136,7 @@ def configure_zoom(
     try:
         permissions_set = move_secret_file(source, target, contents)
     except KeyboardInterrupt:
-        if target.exists() and source.exists():
-            print(
-                "Setup was interrupted after a final Zoom configuration appeared. "
-                "Both files were kept; inspect them before removing the root input "
-                "/ 最终 Zoom 配置出现后设置被中断；两个文件均已保留，"
-                "删除根目录输入文件前请先检查",
-                file=sys.stderr,
-            )
-        elif target.exists():
-            print(
-                "Setup was interrupted after the final Zoom configuration was saved. "
-                "The root input is already gone; check the final file before retrying "
-                "/ 最终 Zoom 配置保存后设置被中断；根目录输入文件已不存在，"
-                "重试前请检查最终文件",
-                file=sys.stderr,
-            )
-        else:
-            print(
-                "Setup was interrupted before the final Zoom configuration was published. "
-                "The input file was kept and temporary files were cleaned up "
-                "/ 最终 Zoom 配置发布前设置被中断；输入文件已保留，临时文件已清理",
-                file=sys.stderr,
-            )
+        _report_move_interrupt("Zoom", source, target)
         return 130
     except FileExistsError:
         print(
@@ -189,9 +164,128 @@ def configure_zoom(
     return 0
 
 
-def main() -> int:
+def configure_youtube(
+    project_root: Path,
+    input_func: Callable[[str], str] = input,
+    credentials_loader: Callable[..., YouTubeCredentialsResult] = load_youtube_credentials,
+    verifier: Callable[[Any], None] = verify_youtube_credentials,
+) -> int:
+    source = project_root / YOUTUBE_INPUT
+    target = project_root / YOUTUBE_TARGET
+    token_path = project_root / YOUTUBE_TOKEN
+    permissions_set = True
+
+    if target.exists():
+        print(
+            "YouTube OAuth client is already saved; the existing file was not overwritten "
+            "/ YouTube OAuth 客户端已保存，未覆盖现有文件"
+        )
+        if source.exists():
+            print(
+                f"The root {YOUTUBE_INPUT} was kept / 根目录 {YOUTUBE_INPUT} 已保留"
+            )
+        try:
+            read_youtube_secret(target)
+        except YouTubeConfigurationError as error:
+            print(f"Error / 错误: {error}", file=sys.stderr)
+            return 1
+    else:
+        if not source.is_file():
+            print(
+                f"No {YOUTUBE_INPUT} found; skipping YouTube setup "
+                f"/ 未找到 {YOUTUBE_INPUT}，跳过 YouTube 配置"
+            )
+            return 0
+        try:
+            contents = read_youtube_secret(source)
+        except YouTubeConfigurationError as error:
+            print(f"Error / 错误: {error}", file=sys.stderr)
+            return 1
+
+        print(
+            "Valid Google Desktop OAuth fields found (values hidden): installed client "
+            "/ 已找到有效 Google 桌面 OAuth 字段（值已隐藏）：installed 客户端"
+        )
+        print(f"The file will be moved to {YOUTUBE_TARGET} / 文件将移动到 {YOUTUBE_TARGET}")
+        if not confirmed(input_func):
+            print("Cancelled; no YouTube files were changed / 已取消，未更改 YouTube 文件")
+            return 0
+
+        try:
+            permissions_set = move_secret_file(
+                source,
+                target,
+                contents,
+                YOUTUBE_TEMP_PREFIX,
+            )
+        except KeyboardInterrupt:
+            _report_move_interrupt("YouTube", source, target)
+            return 130
+        except FileExistsError:
+            print(
+                "YouTube configuration appeared during setup; neither file was overwritten "
+                "/ 配置过程中出现了已有 YouTube 配置；未覆盖任何文件",
+                file=sys.stderr,
+            )
+            return 1
+        except OSError:
+            print(
+                "Could not complete the YouTube secret move; check the root input and "
+                "config/youtube/ for final or temporary files / 无法完成 YouTube 密钥移动；"
+                "请检查根目录输入文件以及 config/youtube/ 中的最终文件或临时文件",
+                file=sys.stderr,
+            )
+            return 1
+
+        print(
+            f"YouTube OAuth client saved at {YOUTUBE_TARGET} "
+            f"/ YouTube OAuth 客户端已保存到 {YOUTUBE_TARGET}"
+        )
+
+    print(
+        "Checking YouTube authorization; the system browser opens only if authorization is needed "
+        "/ 正在检查 YouTube 授权；仅在需要授权时打开系统浏览器"
+    )
     try:
-        return configure_zoom(PROJECT_ROOT)
+        result = credentials_loader(target, token_path, interactive=True)
+        verifier(result.credentials)
+    except KeyboardInterrupt:
+        print(
+            "YouTube authorization was cancelled; the saved OAuth client was kept "
+            "/ YouTube 授权已取消；已保存的 OAuth 客户端仍保留",
+            file=sys.stderr,
+        )
+        return 130
+    except (YouTubeAuthorizationError, YouTubeConfigurationError) as error:
+        print(f"Error / 错误: {error}", file=sys.stderr)
+        return 1
+
+    if result.status == "existing":
+        print("YouTube is already authorized / YouTube 已完成授权")
+    elif result.status == "refreshed":
+        print("YouTube token refreshed safely / YouTube 令牌已安全刷新")
+    else:
+        print(f"YouTube token saved at {YOUTUBE_TOKEN} / YouTube 令牌已保存到 {YOUTUBE_TOKEN}")
+    print("YouTube API access verified without uploading / 已验证 YouTube API 访问，未上传视频")
+
+    if not permissions_set or not result.permissions_set:
+        print(
+            "Warning: could not restrict private-file permissions; protect the files manually "
+            "/ 警告：无法限制私密文件权限，请手动保护这些文件",
+            file=sys.stderr,
+        )
+    return 0
+
+
+def main(project_root: Path = PROJECT_ROOT) -> int:
+    try:
+        zoom_result = configure_zoom(project_root)
+        if zoom_result == 130:
+            return 130
+        youtube_result = configure_youtube(project_root)
+        if youtube_result == 130:
+            return 130
+        return 1 if 1 in (zoom_result, youtube_result) else 0
     except KeyboardInterrupt:
         print("\nCancelled / 已取消")
         return 130
