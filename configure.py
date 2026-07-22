@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import os
 import sys
+import tempfile
 from pathlib import Path
 from typing import Callable
 
@@ -18,6 +19,7 @@ from zoom_auth import (
 PROJECT_ROOT = Path(__file__).resolve().parent
 ZOOM_INPUT = "zoom_secret.json"
 ZOOM_TARGET = Path("config") / "zoom" / "secret.json"
+ZOOM_TEMP_PREFIX = ".zoom-secret-"
 
 
 def confirmed(input_func: Callable[[str], str]) -> bool:
@@ -27,36 +29,62 @@ def confirmed(input_func: Callable[[str], str]) -> bool:
     return answer in ("y", "yes", "是")
 
 
+def _write_secret_contents(file_descriptor: int, contents: str) -> None:
+    with open(
+        file_descriptor,
+        "w",
+        encoding="utf-8",
+        newline="",
+        closefd=False,
+    ) as output:
+        output.write(contents)
+        output.flush()
+        os.fsync(output.fileno())
+
+
 def move_secret_file(source: Path, target: Path, contents: str) -> bool:
     target.parent.mkdir(parents=True, exist_ok=True)
     file_descriptor: int | None = None
-    created = False
+    temporary_path: Path | None = None
+    permissions_set = True
     try:
-        file_descriptor = os.open(
-            target,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-            0o600,
+        file_descriptor, temporary_name = tempfile.mkstemp(
+            prefix=ZOOM_TEMP_PREFIX,
+            suffix=".tmp",
+            dir=target.parent,
         )
-        created = True
-        with os.fdopen(file_descriptor, "w", encoding="utf-8", newline="") as output:
-            file_descriptor = None
-            output.write(contents)
-            output.flush()
-            os.fsync(output.fileno())
-        source.unlink()
-    except Exception:
-        if file_descriptor is not None:
-            os.close(file_descriptor)
-        if created and source.exists():
-            target.unlink(missing_ok=True)
-        raise
+        temporary_path = Path(temporary_name)
+        if os.name == "posix":
+            try:
+                temporary_path.chmod(0o600)
+            except OSError:
+                permissions_set = False
 
-    if os.name == "posix":
-        try:
-            target.chmod(0o600)
-        except OSError:
-            return False
-    return True
+        _write_secret_contents(file_descriptor, contents)
+        os.close(file_descriptor)
+        file_descriptor = None
+
+        # Hard-link publication is atomic and fails if the target already exists.
+        os.link(temporary_path, target)
+        temporary_path.unlink()
+        temporary_path = None
+        source.unlink()
+    except BaseException as error:
+        cleanup_error: OSError | None = None
+        if file_descriptor is not None:
+            try:
+                os.close(file_descriptor)
+            except OSError as close_error:
+                cleanup_error = close_error
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError as unlink_error:
+                cleanup_error = cleanup_error or unlink_error
+        if cleanup_error is not None:
+            raise cleanup_error from error
+        raise
+    return permissions_set
 
 
 def configure_zoom(
@@ -110,6 +138,31 @@ def configure_zoom(
 
     try:
         permissions_set = move_secret_file(source, target, contents)
+    except KeyboardInterrupt:
+        if target.exists() and source.exists():
+            print(
+                "Setup was interrupted after a final Zoom configuration appeared. "
+                "Both files were kept; inspect them before removing the root input "
+                "/ 最终 Zoom 配置出现后设置被中断；两个文件均已保留，"
+                "删除根目录输入文件前请先检查",
+                file=sys.stderr,
+            )
+        elif target.exists():
+            print(
+                "Setup was interrupted after the final Zoom configuration was saved. "
+                "The root input is already gone; check the final file before retrying "
+                "/ 最终 Zoom 配置保存后设置被中断；根目录输入文件已不存在，"
+                "重试前请检查最终文件",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "Setup was interrupted before the final Zoom configuration was published. "
+                "The input file was kept and temporary files were cleaned up "
+                "/ 最终 Zoom 配置发布前设置被中断；输入文件已保留，临时文件已清理",
+                file=sys.stderr,
+            )
+        return 130
     except FileExistsError:
         print(
             "Zoom configuration appeared during setup; neither file was overwritten "
@@ -119,8 +172,9 @@ def configure_zoom(
         return 1
     except OSError:
         print(
-            "Could not move the Zoom secret file; check both locations "
-            "/ 无法移动 Zoom 密钥文件，请检查两个位置",
+            "Could not complete the Zoom secret move; check the root input and config/zoom/ "
+            "for final or temporary files / 无法完成 Zoom 密钥移动；请检查根目录输入文件"
+            "以及 config/zoom/ 中的最终文件或临时文件",
             file=sys.stderr,
         )
         return 1
@@ -139,7 +193,7 @@ def main() -> int:
     try:
         return configure_zoom(PROJECT_ROOT)
     except KeyboardInterrupt:
-        print("\nCancelled; no files were changed / 已取消，未更改任何文件")
+        print("\nCancelled / 已取消")
         return 130
 
 
