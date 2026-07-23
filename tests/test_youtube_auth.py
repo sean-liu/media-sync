@@ -3,6 +3,7 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest.mock import patch
 
 from youtube_auth import (
     YOUTUBE_SCOPES,
@@ -11,7 +12,6 @@ from youtube_auth import (
     load_youtube_credentials,
     read_youtube_secret,
     validate_youtube_secret,
-    verify_youtube_credentials,
 )
 
 
@@ -27,10 +27,23 @@ VALID_SECRET = {
 
 
 class FakeCredentials:
-    def __init__(self, *, valid=True, expired=False, refresh_token="refresh-value"):
+    _UNSET = object()
+
+    def __init__(
+        self,
+        *,
+        valid=True,
+        expired=False,
+        refresh_token="refresh-value",
+        scopes=YOUTUBE_SCOPES,
+        granted_scopes=_UNSET,
+    ):
         self.valid = valid
         self.expired = expired
         self.refresh_token = refresh_token
+        self.scopes = scopes
+        if granted_scopes is not self._UNSET:
+            self.granted_scopes = granted_scopes
         self.refresh_error = None
 
     def refresh(self, _request):
@@ -121,18 +134,26 @@ class YouTubeAuthorizationTests(unittest.TestCase):
     def request_factory():
         return object()
 
-    def test_oauth_success_saves_private_utf8_token(self):
+    def test_oauth_success_saves_private_utf8_token_without_api_service(self):
         credentials = FakeCredentials()
         flow = FakeFlow(result=credentials)
 
-        result = load_youtube_credentials(
-            self.secret,
-            self.token,
-            interactive=True,
-            credentials_loader=self.unused_loader,
-            request_factory=self.request_factory,
-            flow_factory=lambda path, scopes: flow,
-        )
+        real_import = __import__
+
+        def reject_api_service_import(name, *args, **kwargs):
+            if name.startswith("googleapiclient"):
+                raise AssertionError("YouTube Data API service must not be imported")
+            return real_import(name, *args, **kwargs)
+
+        with patch("builtins.__import__", side_effect=reject_api_service_import):
+            result = load_youtube_credentials(
+                self.secret,
+                self.token,
+                interactive=True,
+                credentials_loader=self.unused_loader,
+                request_factory=self.request_factory,
+                flow_factory=lambda path, scopes: flow,
+            )
 
         self.assertEqual(result.status, "authorized")
         self.assertTrue(self.token.is_file())
@@ -142,6 +163,64 @@ class YouTubeAuthorizationTests(unittest.TestCase):
         self.assertEqual(flow.kwargs["timeout_seconds"], 300)
         if os.name == "posix":
             self.assertEqual(self.token.stat().st_mode & 0o777, 0o600)
+
+    def test_oauth_without_confirmable_upload_scope_is_rejected(self):
+        credentials = FakeCredentials(scopes=None)
+        del credentials.scopes
+        flow = FakeFlow(result=credentials)
+
+        with self.assertRaisesRegex(YouTubeAuthorizationError, "youtube.upload"):
+            load_youtube_credentials(
+                self.secret,
+                self.token,
+                interactive=True,
+                credentials_loader=self.unused_loader,
+                request_factory=self.request_factory,
+                flow_factory=lambda path, scopes: flow,
+            )
+
+        self.assertFalse(self.token.exists())
+
+    def test_existing_valid_token_is_reused_without_browser(self):
+        self.token.write_text("{}", encoding="utf-8")
+        credentials = FakeCredentials()
+        flow_called = False
+
+        def flow_factory(*_args):
+            nonlocal flow_called
+            flow_called = True
+            raise AssertionError("browser flow must not start")
+
+        result = load_youtube_credentials(
+            self.secret,
+            self.token,
+            interactive=True,
+            credentials_loader=lambda *_args: credentials,
+            request_factory=self.request_factory,
+            flow_factory=flow_factory,
+        )
+
+        self.assertEqual(result.status, "existing")
+        self.assertFalse(flow_called)
+
+    def test_actual_granted_scopes_override_requested_scopes(self):
+        credentials = FakeCredentials(
+            scopes=YOUTUBE_SCOPES,
+            granted_scopes=["unrelated.scope"],
+        )
+        flow = FakeFlow(result=credentials)
+
+        with self.assertRaisesRegex(YouTubeAuthorizationError, "youtube.upload"):
+            load_youtube_credentials(
+                self.secret,
+                self.token,
+                interactive=True,
+                credentials_loader=self.unused_loader,
+                request_factory=self.request_factory,
+                flow_factory=lambda path, scopes: flow,
+            )
+
+        self.assertFalse(self.token.exists())
 
     def test_oauth_failure_hides_underlying_token_and_secret(self):
         sensitive_token = "do-not-print-access-token"
@@ -244,34 +323,5 @@ class YouTubeAuthorizationTests(unittest.TestCase):
         self.assertFalse(flow_called)
         if os.name == "posix":
             self.assertEqual(self.token.stat().st_mode & 0o777, 0o600)
-
-
-class YouTubeVerificationTests(unittest.TestCase):
-    def test_channel_check_does_not_upload(self):
-        calls = []
-
-        class Request:
-            def execute(self):
-                calls.append("execute")
-                return {"items": [{"id": "hidden-channel-id"}]}
-
-        class Channels:
-            def list(self, **kwargs):
-                calls.append(kwargs)
-                return Request()
-
-        class Service:
-            def channels(self):
-                return Channels()
-
-        verify_youtube_credentials(
-            object(),
-            service_builder=lambda *args, **kwargs: Service(),
-        )
-
-        self.assertEqual(calls[0], {"part": "id", "mine": True, "maxResults": 1})
-        self.assertEqual(calls[1], "execute")
-
-
 if __name__ == "__main__":
     unittest.main()

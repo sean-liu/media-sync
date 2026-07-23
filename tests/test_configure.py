@@ -3,7 +3,7 @@ import json
 import os
 import tempfile
 import unittest
-from contextlib import redirect_stderr
+from contextlib import redirect_stderr, redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
 
@@ -195,17 +195,17 @@ class ConfigureYouTubeTests(unittest.TestCase):
         self.assertTrue(interactive)
         return YouTubeCredentialsResult(self.credentials, "authorized")
 
-    def test_successful_setup_moves_exact_file_and_verifies_api(self):
+    def test_successful_setup_moves_exact_file_without_api_probe(self):
         unrelated = self.project_root / "other.json"
         unrelated.write_text('{"leave": true}', encoding="utf-8")
-        verified = []
+        output = io.StringIO()
 
-        result = configure_youtube(
-            self.project_root,
-            input_func=lambda _: "y",
-            credentials_loader=self.authorize,
-            verifier=verified.append,
-        )
+        with redirect_stdout(output):
+            result = configure_youtube(
+                self.project_root,
+                input_func=lambda _: "y",
+                credentials_loader=self.authorize,
+            )
 
         self.assertEqual(result, 0)
         self.assertFalse(self.source.exists())
@@ -214,7 +214,12 @@ class ConfigureYouTubeTests(unittest.TestCase):
             VALID_YOUTUBE_SECRET,
         )
         self.assertEqual(unrelated.read_text(encoding="utf-8"), '{"leave": true}')
-        self.assertEqual(verified, [self.credentials])
+        self.assertIn(
+            "YouTube OAuth 已配置，token 已保存；首次上传时会检查频道上传资格。",
+            output.getvalue(),
+        )
+        self.assertNotIn("API access verified", output.getvalue())
+        self.assertNotIn("已验证 YouTube API 访问", output.getvalue())
         self.assertEqual(self.temporary_secret_files(), [])
         if os.name == "posix":
             self.assertEqual(self.target.stat().st_mode & 0o777, 0o600)
@@ -229,7 +234,6 @@ class ConfigureYouTubeTests(unittest.TestCase):
             self.project_root,
             input_func=lambda _: "y",
             credentials_loader=self.authorize,
-            verifier=lambda _: None,
         )
 
         self.assertEqual(result, 0)
@@ -242,7 +246,6 @@ class ConfigureYouTubeTests(unittest.TestCase):
                 self.project_root,
                 input_func=lambda _: "y",
                 credentials_loader=self.authorize,
-                verifier=lambda _: None,
             )
 
         self.assertEqual(result, 130)
@@ -266,7 +269,6 @@ class ConfigureYouTubeTests(unittest.TestCase):
                 self.project_root,
                 input_func=lambda _: "y",
                 credentials_loader=fail_authorization,
-                verifier=lambda _: None,
             )
 
         self.assertEqual(result, 1)

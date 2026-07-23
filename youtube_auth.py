@@ -116,8 +116,32 @@ def _save_credentials(
 def _credentials_are_valid(credentials: Any) -> bool:
     if credentials is None or not getattr(credentials, "valid", False):
         return False
+
+    required_scopes = set(YOUTUBE_SCOPES)
+    granted_scopes = getattr(credentials, "granted_scopes", None)
+    if granted_scopes is not None:
+        return required_scopes.issubset(_normalize_scopes(granted_scopes))
+
+    configured_scopes = getattr(credentials, "scopes", None)
+    if configured_scopes is not None:
+        return required_scopes.issubset(_normalize_scopes(configured_scopes))
+
     has_scopes = getattr(credentials, "has_scopes", None)
-    return not callable(has_scopes) or bool(has_scopes(YOUTUBE_SCOPES))
+    if not callable(has_scopes):
+        return False
+    try:
+        return bool(has_scopes(YOUTUBE_SCOPES))
+    except Exception:
+        return False
+
+
+def _normalize_scopes(scopes: Any) -> set[str]:
+    if isinstance(scopes, str):
+        return set(scopes.split())
+    try:
+        return {scope for scope in scopes if isinstance(scope, str)}
+    except TypeError:
+        return set()
 
 
 def load_youtube_credentials(
@@ -140,7 +164,7 @@ def load_youtube_credentials(
     refresh_failed = False
     if token_path.is_file():
         try:
-            credentials = credentials_loader(str(token_path), YOUTUBE_SCOPES)
+            credentials = credentials_loader(str(token_path))
         except Exception:
             credentials = None
 
@@ -190,59 +214,16 @@ def load_youtube_credentials(
             "请检查浏览器、回调及 OAuth 测试用户设置后重试"
         ) from error
 
-    if not _credentials_are_valid(credentials):
+    if credentials is None or not getattr(credentials, "valid", False):
         raise YouTubeAuthorizationError(
             "YouTube authorization did not return valid credentials; retry configure.py "
             "/ YouTube 授权未返回有效凭据，请重新运行 configure.py"
         )
+    if not _credentials_are_valid(credentials):
+        raise YouTubeAuthorizationError(
+            "YouTube authorization did not confirm the required youtube.upload permission; "
+            "run configure.py again / YouTube 授权未能确认所需的 youtube.upload 权限，"
+            "请重新运行 configure.py"
+        )
     permissions_set = _save_credentials(token_path, credentials, token_writer)
     return YouTubeCredentialsResult(credentials, "authorized", permissions_set)
-
-
-def verify_youtube_credentials(
-    credentials: Any,
-    service_builder: Callable[..., Any] | None = None,
-) -> None:
-    if service_builder is None:
-        try:
-            from googleapiclient.discovery import build
-        except ImportError as error:
-            raise YouTubeAuthorizationError(
-                "Missing YouTube API packages; run the installer first "
-                "/ 缺少 YouTube API 依赖，请先运行安装脚本"
-            ) from error
-        service_builder = build
-
-    try:
-        response = (
-            service_builder(
-                "youtube",
-                "v3",
-                credentials=credentials,
-                cache_discovery=False,
-            )
-            .channels()
-            .list(part="id", mine=True, maxResults=1)
-            .execute()
-        )
-    except Exception as error:
-        response_status = getattr(getattr(error, "resp", None), "status", None)
-        if response_status in (401, 403):
-            message = (
-                "YouTube authorization check was rejected. Confirm that YouTube Data API v3 "
-                "is enabled, the account has a channel, and this account is an OAuth test user "
-                "/ YouTube 授权检查被拒绝；请确认已启用 YouTube Data API v3、账号有频道，"
-                "且该账号已加入 OAuth 测试用户"
-            )
-        else:
-            message = (
-                "Could not verify YouTube API access. Check the network and try configure.py again "
-                "/ 无法验证 YouTube API 访问；请检查网络后重新运行 configure.py"
-            )
-        raise YouTubeAuthorizationError(message) from error
-
-    if not isinstance(response, dict) or not response.get("items"):
-        raise YouTubeAuthorizationError(
-            "YouTube authorization succeeded, but no YouTube channel was found for this account "
-            "/ YouTube 授权成功，但此账号没有可用的 YouTube 频道"
-        )

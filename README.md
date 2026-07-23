@@ -91,7 +91,7 @@ Windows：
 
 - Zoom 凭据先通过 Zoom 临时验证，再安全移动到 `config/zoom/secret.json`；取得的 Zoom access token 不会保存。
 - YouTube 客户端验证为 Google Desktop OAuth JSON 后，安全移动到 `config/youtube/secret.json`。随后只申请 `youtube.upload` 权限，在系统浏览器打开 Google 授权页面，并安全生成 `config/youtube/token.json`。
-- 已有目标文件不会被覆盖；已有有效 YouTube token 会直接复用，必要时正常刷新。授权结束后程序会调用不会上传视频的 YouTube API 做最小验证。
+- 已有目标文件不会被覆盖；已有有效 YouTube token 会直接复用，必要时正常刷新。`configure.py` 不上传视频，也不调用 YouTube 频道或其他 Data API；首次实际上传时，YouTube 才会确认该 Google 账号是否有可上传的频道。无需额外授予读取频道资料的权限。
 
 最终目录树：
 
@@ -242,7 +242,7 @@ Windows:
 
 - Zoom credentials are temporarily validated with Zoom, then safely moved to `config/zoom/secret.json`. The temporary Zoom access token is never saved.
 - The YouTube client is validated as Google Desktop OAuth JSON, then safely moved to `config/youtube/secret.json`. The program requests only the `youtube.upload` scope, opens Google's authorization page in the system browser, and safely creates `config/youtube/token.json`.
-- Existing destinations are never overwritten. A valid YouTube token is reused and refreshed normally when needed. After authorization, the program makes a minimal YouTube API check that does not upload a video.
+- Existing destinations are never overwritten. A valid YouTube token is reused and refreshed normally when needed. `configure.py` does not upload videos or call YouTube channel or other Data API endpoints; YouTube confirms whether the Google account has an upload-capable channel only on the first real upload. No additional permission to read channel data is requested.
 
 The final layout is:
 

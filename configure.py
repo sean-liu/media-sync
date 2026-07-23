@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 from secure_files import move_private_text
 from youtube_auth import (
@@ -14,7 +14,6 @@ from youtube_auth import (
     YouTubeCredentialsResult,
     load_youtube_credentials,
     read_youtube_secret,
-    verify_youtube_credentials,
 )
 from zoom_auth import (
     ZoomConfigurationError,
@@ -168,7 +167,6 @@ def configure_youtube(
     project_root: Path,
     input_func: Callable[[str], str] = input,
     credentials_loader: Callable[..., YouTubeCredentialsResult] = load_youtube_credentials,
-    verifier: Callable[[Any], None] = verify_youtube_credentials,
 ) -> int:
     source = project_root / YOUTUBE_INPUT
     target = project_root / YOUTUBE_TARGET
@@ -248,7 +246,6 @@ def configure_youtube(
     )
     try:
         result = credentials_loader(target, token_path, interactive=True)
-        verifier(result.credentials)
     except KeyboardInterrupt:
         print(
             "YouTube authorization was cancelled; the saved OAuth client was kept "
@@ -266,7 +263,11 @@ def configure_youtube(
         print("YouTube token refreshed safely / YouTube 令牌已安全刷新")
     else:
         print(f"YouTube token saved at {YOUTUBE_TOKEN} / YouTube 令牌已保存到 {YOUTUBE_TOKEN}")
-    print("YouTube API access verified without uploading / 已验证 YouTube API 访问，未上传视频")
+    print(
+        "YouTube OAuth is configured and the token is saved; YouTube will check channel "
+        "upload eligibility on the first upload / YouTube OAuth 已配置，token 已保存；"
+        "首次上传时会检查频道上传资格。"
+    )
 
     if not permissions_set or not result.permissions_set:
         print(
