@@ -181,6 +181,96 @@ class YouTubeAuthorizationTests(unittest.TestCase):
 
         self.assertFalse(self.token.exists())
 
+    def test_empty_granted_scopes_fall_back_to_scopes_and_save_token(self):
+        credentials = FakeCredentials(
+            scopes=YOUTUBE_SCOPES,
+            granted_scopes=[],
+        )
+        flow = FakeFlow(result=credentials)
+
+        result = load_youtube_credentials(
+            self.secret,
+            self.token,
+            interactive=True,
+            credentials_loader=self.unused_loader,
+            request_factory=self.request_factory,
+            flow_factory=lambda path, scopes: flow,
+        )
+
+        self.assertEqual(result.status, "authorized")
+        self.assertTrue(self.token.is_file())
+
+    def test_empty_granted_scopes_without_matching_scopes_are_rejected(self):
+        missing_scopes = FakeCredentials(granted_scopes=[])
+        del missing_scopes.scopes
+        cases = (
+            ("missing", missing_scopes),
+            ("empty", FakeCredentials(scopes=[], granted_scopes=[])),
+            (
+                "mismatched",
+                FakeCredentials(scopes=["unrelated.scope"], granted_scopes=[]),
+            ),
+        )
+
+        for name, credentials in cases:
+            with self.subTest(name=name):
+                flow = FakeFlow(result=credentials)
+                with self.assertRaisesRegex(
+                    YouTubeAuthorizationError,
+                    "youtube.upload",
+                ):
+                    load_youtube_credentials(
+                        self.secret,
+                        self.token,
+                        interactive=True,
+                        credentials_loader=self.unused_loader,
+                        request_factory=self.request_factory,
+                        flow_factory=lambda path, scopes: flow,
+                    )
+                self.assertFalse(self.token.exists())
+
+    def test_empty_scope_attributes_fall_back_to_has_scopes(self):
+        credentials = FakeCredentials(scopes=[], granted_scopes=[])
+        credentials.has_scopes = lambda scopes: scopes == YOUTUBE_SCOPES
+        flow = FakeFlow(result=credentials)
+
+        result = load_youtube_credentials(
+            self.secret,
+            self.token,
+            interactive=True,
+            credentials_loader=self.unused_loader,
+            request_factory=self.request_factory,
+            flow_factory=lambda path, scopes: flow,
+        )
+
+        self.assertEqual(result.status, "authorized")
+        self.assertTrue(self.token.is_file())
+
+    def test_scope_check_exception_is_rejected_without_saving_token(self):
+        credentials = FakeCredentials(scopes=[], granted_scopes=[])
+
+        def fail_scope_check(_scopes):
+            raise RuntimeError("sensitive-scope-check-details")
+
+        credentials.has_scopes = fail_scope_check
+        flow = FakeFlow(result=credentials)
+
+        with self.assertRaisesRegex(
+            YouTubeAuthorizationError,
+            "youtube.upload",
+        ) as context:
+            load_youtube_credentials(
+                self.secret,
+                self.token,
+                interactive=True,
+                credentials_loader=self.unused_loader,
+                request_factory=self.request_factory,
+                flow_factory=lambda path, scopes: flow,
+            )
+
+        self.assertFalse(self.token.exists())
+        self.assertNotIn("sensitive-scope-check-details", str(context.exception))
+
     def test_existing_valid_token_is_reused_without_browser(self):
         self.token.write_text("{}", encoding="utf-8")
         credentials = FakeCredentials()

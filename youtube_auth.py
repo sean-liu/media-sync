@@ -114,22 +114,27 @@ def _save_credentials(
 
 
 def _credentials_are_valid(credentials: Any) -> bool:
-    if credentials is None or not getattr(credentials, "valid", False):
+    if credentials is None:
         return False
 
-    required_scopes = set(YOUTUBE_SCOPES)
-    granted_scopes = getattr(credentials, "granted_scopes", None)
-    if granted_scopes is not None:
-        return required_scopes.issubset(_normalize_scopes(granted_scopes))
-
-    configured_scopes = getattr(credentials, "scopes", None)
-    if configured_scopes is not None:
-        return required_scopes.issubset(_normalize_scopes(configured_scopes))
-
-    has_scopes = getattr(credentials, "has_scopes", None)
-    if not callable(has_scopes):
-        return False
     try:
+        if not getattr(credentials, "valid", False):
+            return False
+
+        required_scopes = set(YOUTUBE_SCOPES)
+        granted_scopes = _normalize_scopes(
+            getattr(credentials, "granted_scopes", None)
+        )
+        if granted_scopes:
+            return required_scopes.issubset(granted_scopes)
+
+        configured_scopes = _normalize_scopes(getattr(credentials, "scopes", None))
+        if configured_scopes:
+            return required_scopes.issubset(configured_scopes)
+
+        has_scopes = getattr(credentials, "has_scopes", None)
+        if not callable(has_scopes):
+            return False
         return bool(has_scopes(YOUTUBE_SCOPES))
     except Exception:
         return False
